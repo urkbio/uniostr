@@ -204,6 +204,24 @@ test('NIP-09 按 a 标签删除可寻址事件并阻止旧版本重新入库', (
   assert.equal(store.save(newerVersion), 'stored');
 });
 
+test('本地按 id 删除并写入 tombstone', () => {
+  const { store } = createTestStore();
+  const key = createTestKey();
+  const event = createSignedEvent(key, {
+    created_at: 100,
+    tags: [['t', 'deletable']],
+  });
+
+  assert.equal(store.save(event), 'stored');
+  assert.equal(store.deleteEventById(event.id), true);
+  assert.deepEqual(store.query([normalizeFilter({})]), []);
+  assert.deepEqual(store.query([normalizeFilter({ '#t': ['deletable'] })]), []);
+  assert.equal(store.save(event), 'deleted');
+
+  assert.equal(store.deleteEventById(event.id), false);
+  assert.equal(store.save(event), 'deleted');
+});
+
 test('标签索引随写入、替换与删除维护', () => {
   const { db, store } = createTestStore();
   const key = createTestKey();

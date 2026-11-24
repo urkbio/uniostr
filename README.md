@@ -83,6 +83,8 @@ src/
   storage/database.ts     SQLite 连接封装
   storage/schema.ts       表结构与迁移（PRAGMA user_version）
   storage/events.ts       事件写入、查询、替换、删除
+  storage/sync-state.ts   远端同步进度持久化
+  tools/delete-event.ts   本地按 id 删除事件的维护命令
   utils/logger.ts         统一日志输出
 test/                     node:test 单元与集成测试
 data/                     SQLite 数据文件目录
@@ -133,6 +135,18 @@ logs/                     日志目录（预留）
 
 该同步是单向、按作者拉取，不做双向同步、Negentropy；历史分页依赖远端按 `created_at` 倒序返回，
 同一秒内超过一页的事件可能被跳过。
+
+## 本地按 id 删除
+
+```powershell
+npm run delete -- <64 位 hex 事件 id>
+```
+
+- 直接删除本地事件行及其标签索引；
+- 同时写入 `deleted_events` tombstone，之后同一 id 再入库（包括远端同步拉取）会被拒绝；
+- 事件不存在时也会写 tombstone，避免远端同步之后又把它拉回来；
+- 该命令不校验作者，属于本地所有者维护操作；程序运行时执行也安全（SQLite WAL 支持并发）；
+- 协议内的删除仍应使用 NIP-09（kind 5，仅作者本人可删）。
 
 ## 尚未实现
 

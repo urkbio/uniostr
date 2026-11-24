@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "tsx src/main.ts",
+    "delete": "tsx src/tools/delete-event.ts",
     "test": "tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },

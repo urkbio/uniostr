@@ -103,6 +103,8 @@ export class EventStore {
   private readonly stmtUpsertDeletedCoordinate: BetterSqlite3.Statement;
   private readonly stmtDeleteByAuthor: BetterSqlite3.Statement;
   private readonly stmtDeleteCoordinateEvents: BetterSqlite3.Statement;
+  private readonly stmtDeleteAnyById: BetterSqlite3.Statement;
+  private readonly stmtDeleteTagsByEvent: BetterSqlite3.Statement;
 
   constructor(private readonly db: BetterSqlite3.Database) {
     this.stmtInsert = db.prepare(SQL_INSERT_EVENT);
@@ -139,12 +141,29 @@ export class EventStore {
       `DELETE FROM events
        WHERE pubkey = ? AND kind = ? AND COALESCE(d_tag, '') = ? AND created_at <= ?`,
     );
+    this.stmtDeleteAnyById = db.prepare('DELETE FROM events WHERE id = ?');
+    this.stmtDeleteTagsByEvent = db.prepare('DELETE FROM event_tags WHERE event_id = ?');
 
     this.saveTransaction = db.transaction((event: NostrEvent) => this.applySave(event));
   }
 
   save(event: NostrEvent): SaveResult {
     return this.saveTransaction(event);
+  }
+
+  /**
+   * 本地维护用：按 id 直接删除事件并写入 tombstone（不校验作者）。
+   * 返回该事件删除前是否存在；即使不存在也会留下 tombstone，阻止远端同步重新拉回。
+   */
+  deleteEventById(id: string): boolean {
+    const transaction = this.db.transaction((eventId: string) => {
+      const existed = this.stmtExistsId.get(eventId) !== undefined;
+      this.stmtDeleteTagsByEvent.run(eventId);
+      this.stmtDeleteAnyById.run(eventId);
+      this.stmtInsertDeletedEvent.run(eventId, Math.floor(Date.now() / 1000));
+      return existed;
+    });
+    return transaction(id);
   }
 
   query(filters: readonly NostrFilter[]): NostrEvent[] {
