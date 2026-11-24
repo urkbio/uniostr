@@ -12,6 +12,7 @@
 可寻址事件（NIP-33，kind 30000-39999）、临时事件（kind 20000-29999）、NIP-40 过期、
 NIP-09 删除、NIP-42 AUTH 与写入白名单、NIP-11 Relay 信息文档。
 标签查询使用独立 `event_tags` 索引表，支持回复、互动、关注等关系类查询。
+可选从指定远端公开 Relay 单向拉取白名单作者的事件（长连接 + 定时补拉）。
 
 ## 环境要求
 
@@ -40,7 +41,8 @@ npm test          # node:test 单元 + 集成测试
   "database": "./data/relay.db",
   "logLevel": "info",
   "allowedPubkeys": [],
-  "requireAuth": false
+  "requireAuth": false,
+  "remoteRelay": ""
 }
 ```
 
@@ -52,8 +54,9 @@ npm test          # node:test 单元 + 集成测试
 | `logLevel` | `debug` \| `info` \| `warn` \| `error` | 日志级别 |
 | `allowedPubkeys` | string[] | 写入白名单（64 位 hex 公钥），空数组表示不限制 |
 | `requireAuth` | boolean | 为 true 时，连接必须完成 NIP-42 认证才能读写 |
+| `remoteRelay` | string | 远端公开 Relay 地址（`ws://` / `wss://`），空字符串表示不启用同步 |
 
-`allowedPubkeys` 与 `requireAuth` 可省略，缺省为 `[]` / `false`。配置类型非法时启动会失败并输出明确错误。
+`allowedPubkeys`、`requireAuth`、`remoteRelay` 可省略，缺省为 `[]` / `false` / `""`。配置类型非法时启动会失败并输出明确错误。
 
 ## 服务端点
 
@@ -72,6 +75,7 @@ src/
   app/app.ts              生命周期：启动 / 资源释放 / 信号处理
   relay/server.ts         HTTP 与 WebSocket 服务
   relay/handler.ts        协议处理：校验、入库、订阅、广播、AUTH
+  relay/remote-sync.ts    远端 Relay 单向拉取（长连接 + 定时补拉）
   protocol/event.ts       事件类型、ID 计算、签名校验、kind 分类
   protocol/filter.ts      filter 校验/规范化与内存匹配
   protocol/auth.ts        NIP-42 AUTH 事件校验
@@ -97,6 +101,8 @@ logs/                     日志目录（预留）
 
 删除记录：`deleted_events`（按 id 的 tombstone）与 `deleted_coordinates`（可寻址坐标的 tombstone）。
 
+`sync_state` 表：记录每个远端 Relay 的历史回溯进度（`backfill_complete` / `backfill_cursor`）与 `last_seen`。
+
 结构升级使用 `PRAGMA user_version` + `src/storage/schema.ts` 的顺序迁移列表，不引入 ORM 或迁移框架。
 
 ## 协议行为
@@ -113,6 +119,21 @@ logs/                     日志目录（预留）
 可替换事件按 `(pubkey, kind)` 保留最新（同时间戳保留 id 字典序较小者）；可寻址事件按
 `(pubkey, kind, d)` 保留最新；临时事件只推送不落库；过期事件拒绝写入并在查询中排除。
 
+## 远端同步
+
+配置 `remoteRelay` 后，程序会与远端 Relay 建立一条长期 WebSocket 连接，只订阅
+`allowedPubkeys` 中的作者，拉取这些作者的全部 kind 事件（NIP-01 全部字段原样入库）：
+
+- 实时订阅：连接后立即建立，持续接收新事件，按 `lastSeen - 5 分钟` 作为 `since`；
+- 历史回溯：按 `until` 游标分页拉取完整历史（默认每页 500 条），直到某页不足一页为止；
+- 同步进度写入 `sync_state` 表，重启后从断点续传，不会重复全量回溯；
+- 远端推送的事件会重新做结构校验、白名单过滤、ID/签名验证，再交给 `EventStore` 去重入库；
+- 断线 5 秒后自动重连；`allowedPubkeys` 为空时不会同步（避免拉取全量公共数据）；
+- 远端要求 AUTH 时忽略（只读同步），远端限制只读访问时同步会失败并记录日志。
+
+该同步是单向、按作者拉取，不做双向同步、Negentropy；历史分页依赖远端按 `created_at` 倒序返回，
+同一秒内超过一页的事件可能被跳过。
+
 ## 尚未实现
 
-COUNT/NIP-45、NIP-50 搜索、Negentropy、远端 Relay 同步、多用户权限体系、管理 API / Web 界面。
+COUNT/NIP-45、NIP-50 搜索、Negentropy、双向 Relay 同步、多用户权限体系、管理 API / Web 界面。

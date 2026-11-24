@@ -95,6 +95,19 @@ const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sync_state (
+          relay             TEXT    PRIMARY KEY NOT NULL,
+          backfill_complete INTEGER NOT NULL DEFAULT 0,
+          backfill_cursor   INTEGER,
+          last_seen         INTEGER NOT NULL DEFAULT 0
+        );
+      `);
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.reduce((max, migration) => Math.max(max, migration.version), 0);

@@ -15,6 +15,8 @@ export interface RelayConfig {
   allowedPubkeys: string[];
   /** 为 true 时，连接必须完成 NIP-42 认证才能读写 */
   requireAuth: boolean;
+  /** 远端公开 Relay 地址（ws:// 或 wss://），空字符串表示不启用同步 */
+  remoteRelay: string;
 }
 
 export const DEFAULT_CONFIG: RelayConfig = {
@@ -24,6 +26,7 @@ export const DEFAULT_CONFIG: RelayConfig = {
   logLevel: 'info',
   allowedPubkeys: [],
   requireAuth: false,
+  remoteRelay: '',
 };
 
 export const DEFAULT_CONFIG_PATH = path.resolve(process.cwd(), 'config.json');
@@ -77,6 +80,29 @@ function validateRequireAuth(value: unknown, configPath: string): boolean {
   return value;
 }
 
+function validateRemoteRelay(value: unknown, configPath: string): string {
+  if (value === undefined) {
+    return '';
+  }
+  if (typeof value !== 'string') {
+    throw new ConfigError(`配置项 "remoteRelay" 必须是字符串，当前值：${JSON.stringify(value)}`, configPath);
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return '';
+  }
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new ConfigError(`配置项 "remoteRelay" 不是合法的 URL：${trimmed}`, configPath);
+  }
+  if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
+    throw new ConfigError(`配置项 "remoteRelay" 必须是 ws:// 或 wss:// 地址：${trimmed}`, configPath);
+  }
+  return trimmed;
+}
+
 function validateConfig(raw: unknown, configPath: string): RelayConfig {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new ConfigError('配置文件内容必须是 JSON 对象', configPath);
@@ -106,6 +132,7 @@ function validateConfig(raw: unknown, configPath: string): RelayConfig {
     logLevel,
     allowedPubkeys: validateAllowedPubkeys(source.allowedPubkeys, configPath),
     requireAuth: validateRequireAuth(source.requireAuth, configPath),
+    remoteRelay: validateRemoteRelay(source.remoteRelay, configPath),
   };
 }
 

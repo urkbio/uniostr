@@ -64,7 +64,8 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-function parseEvent(value: unknown): NostrEvent | string {
+/** 校验事件对象结构；返回错误描述字符串表示失败 */
+export function parseEventObject(value: unknown): NostrEvent | string {
   if (!isPlainObject(value)) {
     return 'event 必须是 JSON 对象';
   }
@@ -112,7 +113,7 @@ function parseFilters(values: unknown[]): Record<string, unknown>[] | string {
 }
 
 function parseEventMessage(type: 'EVENT' | 'AUTH', args: unknown[]): ParseResult {
-  const event = parseEvent(args[0]);
+  const event = parseEventObject(args[0]);
   if (typeof event === 'string') {
     return invalid(`${type} 消息无效：${event}`);
   }

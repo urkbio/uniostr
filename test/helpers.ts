@@ -61,6 +61,7 @@ export function createTestConfig(overrides: Partial<RelayConfig> = {}): RelayCon
     logLevel: 'error',
     allowedPubkeys: [],
     requireAuth: false,
+    remoteRelay: '',
     ...overrides,
   };
 }

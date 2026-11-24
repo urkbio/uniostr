@@ -3,8 +3,10 @@ import path from 'node:path';
 import { loadConfig } from '../config/config.js';
 import { MessageHandler } from '../relay/handler.js';
 import { RelayServer } from '../relay/server.js';
+import { RemoteSync } from '../relay/remote-sync.js';
 import { RelayDatabase } from '../storage/database.js';
 import { EventStore } from '../storage/events.js';
+import { SyncStateStore } from '../storage/sync-state.js';
 import { logger, setLogLevel } from '../utils/logger.js';
 
 export interface AppOptions {
@@ -26,6 +28,7 @@ const LOGS_DIR = path.resolve(process.cwd(), 'logs');
 export function createApp(options: AppOptions = {}): App {
   let database: RelayDatabase | null = null;
   let server: RelayServer | null = null;
+  let remoteSync: RemoteSync | null = null;
   let stopping: Promise<void> | null = null;
 
   async function stop(): Promise<void> {
@@ -34,10 +37,20 @@ export function createApp(options: AppOptions = {}): App {
     }
 
     stopping = (async () => {
+      const currentSync = remoteSync;
       const currentServer = server;
       const currentDatabase = database;
+      remoteSync = null;
       server = null;
       database = null;
+
+      if (currentSync) {
+        try {
+          currentSync.stop();
+        } catch (error) {
+          logger.error('停止远端同步失败', { error });
+        }
+      }
 
       if (currentServer) {
         try {
@@ -96,6 +109,9 @@ export function createApp(options: AppOptions = {}): App {
       const store = new EventStore(database.connection);
       server = new RelayServer(config, new MessageHandler(store, config));
       await server.start();
+
+      remoteSync = new RemoteSync(config, store, new SyncStateStore(database.connection));
+      remoteSync.start();
 
       registerShutdownHandlers();
       logger.info('uniostr 已启动', { ws: `ws://${config.host}:${config.port}` });

@@ -3,6 +3,7 @@
   "port": 7777,
   "database": "./data/relay.db",
   "logLevel": "info",
-  "allowedPubkeys": [],
-  "requireAuth": false
+  "allowedPubkeys": ["77c2969ea4db4ca1859305d7ebabf6053fd132ddcc88e1b178bfd938a33cfa50"],
+  "requireAuth": false,
+  "remoteRelay": "wss://relay.joomaen.com"
 }
