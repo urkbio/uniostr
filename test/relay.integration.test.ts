@@ -184,3 +184,36 @@ test('白名单限制写入公钥', async (t) => {
   assert.equal(blocked[2], false);
   assert.match(String(blocked[3]), /^blocked:/);
 });
+
+test('NIP-11 Relay 信息文档与 HTTP 状态接口', async (t) => {
+  const relay = await startTestRelay();
+  t.after(async () => {
+    await relay.stop();
+  });
+
+  const infoResponse = await fetch(`${relay.httpUrl}/`, {
+    headers: { Accept: 'application/nostr+json' },
+  });
+  assert.equal(infoResponse.status, 200);
+  assert.match(infoResponse.headers.get('content-type') ?? '', /^application\/nostr\+json/);
+
+  const info = (await infoResponse.json()) as {
+    name: string;
+    supported_nips: number[];
+    limitation: { max_message_length: number; auth_required: boolean };
+  };
+  assert.equal(info.name, 'uniostr');
+  for (const nip of [1, 9, 11, 33, 40, 42]) {
+    assert.ok(info.supported_nips.includes(nip), `supported_nips 应包含 ${nip}`);
+  }
+  assert.equal(info.limitation.max_message_length, 512 * 1024);
+  assert.equal(info.limitation.auth_required, false);
+
+  const statusResponse = await fetch(`${relay.httpUrl}/`);
+  const status = (await statusResponse.json()) as { status: string };
+  assert.equal(status.status, 'ok');
+
+  const healthResponse = await fetch(`${relay.httpUrl}/health`);
+  const health = (await healthResponse.json()) as { status: string };
+  assert.equal(health.status, 'ok');
+});

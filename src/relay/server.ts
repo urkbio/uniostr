@@ -1,10 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
+import packageJson from '../../package.json' with { type: 'json' };
 import type { RelayConfig } from '../config/config.js';
 import { logger } from '../utils/logger.js';
 import type { RelayConnectionHandler } from './handler.js';
 
 const MAX_WS_PAYLOAD_BYTES = 512 * 1024;
+const NOSTR_INFO_CONTENT_TYPE = 'application/nostr+json';
+const SUPPORTED_NIPS = [1, 9, 11, 33, 40, 42];
 
 /**
  * Relay 网络层：只负责 HTTP / WebSocket 的建立、连接管理与关闭，
@@ -112,23 +115,67 @@ export class RelayServer {
       return;
     }
 
-    if (pathname === '/' || pathname === '/health') {
-      this.respondJson(response, 200, {
-        name: 'uniostr',
-        status: 'ok',
-        uptimeSeconds: Math.round((Date.now() - this.startedAt) / 1000),
-        connections: this.wsServer?.clients.size ?? 0,
-      });
+    if (pathname === '/health') {
+      this.respondJson(response, 200, this.buildStatus());
+      return;
+    }
+
+    if (pathname === '/') {
+      if (this.wantsNostrInfo(request)) {
+        this.respondJson(response, 200, this.buildRelayInfo(), NOSTR_INFO_CONTENT_TYPE);
+        return;
+      }
+      this.respondJson(response, 200, this.buildStatus());
       return;
     }
 
     this.respondJson(response, 404, { error: 'not found' });
   }
 
-  private respondJson(response: ServerResponse, statusCode: number, body: Record<string, unknown>): void {
+  private buildStatus(): Record<string, unknown> {
+    return {
+      name: 'uniostr',
+      status: 'ok',
+      uptimeSeconds: Math.round((Date.now() - this.startedAt) / 1000),
+      connections: this.wsServer?.clients.size ?? 0,
+    };
+  }
+
+  /** NIP-11：客户端通过 Accept: application/nostr+json 请求 Relay 信息文档 */
+  private wantsNostrInfo(request: IncomingMessage): boolean {
+    const accept = request.headers.accept;
+    if (!accept) {
+      return false;
+    }
+    return accept
+      .split(',')
+      .some((part) => part.trim().split(';')[0]?.trim() === NOSTR_INFO_CONTENT_TYPE);
+  }
+
+  private buildRelayInfo(): Record<string, unknown> {
+    return {
+      name: 'uniostr',
+      description: 'Personal local Nostr relay',
+      supported_nips: [...SUPPORTED_NIPS],
+      software: packageJson.name,
+      version: packageJson.version,
+      limitation: {
+        max_message_length: MAX_WS_PAYLOAD_BYTES,
+        auth_required: this.config.requireAuth,
+        payment_required: false,
+      },
+    };
+  }
+
+  private respondJson(
+    response: ServerResponse,
+    statusCode: number,
+    body: Record<string, unknown>,
+    contentType = 'application/json; charset=utf-8',
+  ): void {
     const payload = `${JSON.stringify(body)}\n`;
     response.writeHead(statusCode, {
-      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Type': contentType,
       'Content-Length': Buffer.byteLength(payload),
       'Cache-Control': 'no-store',
     });

@@ -10,7 +10,8 @@
 
 已实现：NIP-01（事件校验/存储/过滤查询/订阅/OK/EOSE）、可替换事件（kind 0/3/10000-19999）、
 可寻址事件（NIP-33，kind 30000-39999）、临时事件（kind 20000-29999）、NIP-40 过期、
-NIP-09 删除、NIP-42 AUTH 与写入白名单。
+NIP-09 删除、NIP-42 AUTH 与写入白名单、NIP-11 Relay 信息文档。
+标签查询使用独立 `event_tags` 索引表，支持回复、互动、关注等关系类查询。
 
 ## 环境要求
 
@@ -58,7 +59,8 @@ npm test          # node:test 单元 + 集成测试
 
 | 地址 | 说明 |
 | --- | --- |
-| `GET http://127.0.0.1:7777/` 或 `/health` | 返回运行状态 JSON |
+| `GET /` | 运行状态 JSON；带 `Accept: application/nostr+json` 时返回 NIP-11 Relay 信息文档 |
+| `GET /health` | 返回运行状态 JSON |
 | `ws://127.0.0.1:7777/` | Nostr Relay WebSocket 入口（任意路径均可连接） |
 
 ## 目录结构
@@ -88,7 +90,10 @@ logs/                     日志目录（预留）
 `events` 表：`id`（主键）、`pubkey`、`created_at`、`kind`、`content`、`tags`（JSON 字符串）、`sig`，
 以及写入时冗余的 `d_tag`、`expires_at`（用于可寻址事件与过期查询）。
 
-索引：`(pubkey, created_at)`、`(kind, created_at)`、`(created_at)`、`(pubkey, kind, created_at)`。
+`event_tags` 表：`(event_id, name, value)`，随事件写入/替换/删除自动维护，`#e`、`#p`、`#t` 等标签查询走索引。
+
+索引：`(pubkey, created_at)`、`(kind, created_at)`、`(created_at)`、`(pubkey, kind, created_at)`、
+`event_tags (name, value, event_id)`。
 
 删除记录：`deleted_events`（按 id 的 tombstone）与 `deleted_coordinates`（可寻址坐标的 tombstone）。
 

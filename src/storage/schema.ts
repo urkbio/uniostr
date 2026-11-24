@@ -73,6 +73,28 @@ const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS event_tags (
+          event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+          name     TEXT NOT NULL,
+          value    TEXT NOT NULL,
+          PRIMARY KEY (event_id, name, value)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_event_tags_name_value
+          ON event_tags (name, value, event_id);
+
+        INSERT OR IGNORE INTO event_tags (event_id, name, value)
+        SELECT e.id, json_extract(t.value, '$[0]'), json_extract(t.value, '$[1]')
+        FROM events e, json_each(e.tags) t
+        WHERE json_extract(t.value, '$[0]') IS NOT NULL
+          AND json_extract(t.value, '$[1]') IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.reduce((max, migration) => Math.max(max, migration.version), 0);

@@ -48,6 +48,7 @@ export interface TestStore {
 
 export function createTestStore(): TestStore {
   const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
   initializeSchema(db);
   return { db, store: new EventStore(db) };
 }
@@ -70,11 +71,13 @@ export interface TestRelay {
   store: EventStore;
   db: Database.Database;
   url: string;
+  httpUrl: string;
   stop(): Promise<void>;
 }
 
 export async function startTestRelay(config: RelayConfig = createTestConfig()): Promise<TestRelay> {
   const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
   initializeSchema(db);
   const store = new EventStore(db);
   const handler = new MessageHandler(store, config);
@@ -94,6 +97,7 @@ export async function startTestRelay(config: RelayConfig = createTestConfig()): 
     store,
     db,
     url: `ws://127.0.0.1:${port}`,
+    httpUrl: `http://127.0.0.1:${port}`,
     async stop(): Promise<void> {
       await server.stop();
       db.close();

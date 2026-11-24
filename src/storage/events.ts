@@ -91,6 +91,7 @@ export class EventStore {
   private readonly saveTransaction: (event: NostrEvent) => SaveResult;
 
   private readonly stmtInsert: BetterSqlite3.Statement;
+  private readonly stmtInsertTag: BetterSqlite3.Statement;
   private readonly stmtExistsId: BetterSqlite3.Statement;
   private readonly stmtLatestReplaceable: BetterSqlite3.Statement;
   private readonly stmtLatestAddressable: BetterSqlite3.Statement;
@@ -105,6 +106,9 @@ export class EventStore {
 
   constructor(private readonly db: BetterSqlite3.Database) {
     this.stmtInsert = db.prepare(SQL_INSERT_EVENT);
+    this.stmtInsertTag = db.prepare(
+      'INSERT OR IGNORE INTO event_tags (event_id, name, value) VALUES (?, ?, ?)',
+    );
     this.stmtExistsId = db.prepare('SELECT 1 FROM events WHERE id = ?');
     this.stmtLatestReplaceable = db.prepare(
       'SELECT id, created_at FROM events WHERE pubkey = ? AND kind = ? ORDER BY created_at DESC, id ASC LIMIT 1',
@@ -243,6 +247,14 @@ export class EventStore {
       dTag,
       expiresAt ?? null,
     );
+
+    for (const tag of event.tags) {
+      const name = tag[0];
+      const value = tag[1];
+      if (name !== undefined && value !== undefined) {
+        this.stmtInsertTag.run(event.id, name, value);
+      }
+    }
   }
 
   private applyDeletionRequest(event: NostrEvent): void {
@@ -326,9 +338,10 @@ export class EventStore {
         }
         const placeholders = values.map(() => '?').join(', ');
         conditions.push(
-          `EXISTS (SELECT 1 FROM json_each(events.tags) t
-                    WHERE json_extract(t.value, '$[0]') = ?
-                      AND json_extract(t.value, '$[1]') IN (${placeholders}))`,
+          `EXISTS (SELECT 1 FROM event_tags et
+                    WHERE et.event_id = events.id
+                      AND et.name = ?
+                      AND et.value IN (${placeholders}))`,
         );
         params.push(name, ...values);
       }

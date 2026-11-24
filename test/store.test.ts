@@ -203,3 +203,54 @@ test('NIP-09 按 a 标签删除可寻址事件并阻止旧版本重新入库', (
   });
   assert.equal(store.save(newerVersion), 'stored');
 });
+
+test('标签索引随写入、替换与删除维护', () => {
+  const { db, store } = createTestStore();
+  const key = createTestKey();
+  const target = 'c'.repeat(64);
+
+  const countTags = (eventId: string): number => {
+    const row = db.prepare('SELECT COUNT(*) AS count FROM event_tags WHERE event_id = ?').get(eventId) as {
+      count: number;
+    };
+    return row.count;
+  };
+
+  const post = createSignedEvent(key, {
+    created_at: 100,
+    tags: [
+      ['e', target],
+      ['p', key.pubkey],
+    ],
+  });
+  assert.equal(store.save(post), 'stored');
+  assert.equal(countTags(post.id), 2);
+  assert.deepEqual(
+    store.query([normalizeFilter({ '#e': [target] })]).map((event) => event.id),
+    [post.id],
+  );
+
+  const article = createSignedEvent(key, { kind: 30000, created_at: 200, tags: [['d', 'post'], ['t', 'old']] });
+  const updatedArticle = createSignedEvent(key, {
+    kind: 30000,
+    created_at: 300,
+    tags: [['d', 'post'], ['t', 'new']],
+  });
+  assert.equal(store.save(article), 'stored');
+  assert.equal(store.save(updatedArticle), 'stored');
+  assert.equal(countTags(article.id), 0);
+  assert.deepEqual(store.query([normalizeFilter({ '#t': ['old'] })]), []);
+  assert.deepEqual(
+    store.query([normalizeFilter({ '#t': ['new'] })]).map((event) => event.id),
+    [updatedArticle.id],
+  );
+
+  const deletion = createSignedEvent(key, {
+    kind: 5,
+    created_at: 400,
+    tags: [['e', post.id]],
+  });
+  assert.equal(store.save(deletion), 'stored');
+  assert.equal(countTags(post.id), 0);
+  assert.deepEqual(store.query([normalizeFilter({ '#e': [target] })]), []);
+});
