@@ -1,17 +1,9 @@
+import type { NostrEvent } from './event.js';
+
 /**
  * Nostr 协议消息的基础类型与识别逻辑。
- * 当前阶段只做结构识别，不包含签名字验、EOSE、订阅管理等协议语义。
+ * 当前阶段只做结构识别，签名/过滤等语义在校验层与 handler 中处理。
  */
-
-export interface NostrEvent {
-  id: string;
-  pubkey: string;
-  created_at: number;
-  kind: number;
-  content: string;
-  tags: string[][];
-  sig: string;
-}
 
 export type ClientMessageType = 'EVENT' | 'REQ' | 'CLOSE' | 'AUTH' | 'COUNT';
 
@@ -181,5 +173,31 @@ export function parseClientMessage(raw: string): ParseResult {
     }
     default:
       return invalid(`不支持的消息类型：${type}`, 'unsupported-type');
+  }
+}
+
+/** Relay -> 客户端的消息 */
+export type ServerMessage =
+  | { type: 'EVENT'; subscriptionId: string; event: NostrEvent }
+  | { type: 'EOSE'; subscriptionId: string }
+  | { type: 'OK'; eventId: string; accepted: boolean; message: string }
+  | { type: 'CLOSED'; subscriptionId: string; message: string }
+  | { type: 'NOTICE'; message: string }
+  | { type: 'AUTH'; challenge: string };
+
+export function serializeServerMessage(message: ServerMessage): string {
+  switch (message.type) {
+    case 'EVENT':
+      return JSON.stringify(['EVENT', message.subscriptionId, message.event]);
+    case 'EOSE':
+      return JSON.stringify(['EOSE', message.subscriptionId]);
+    case 'OK':
+      return JSON.stringify(['OK', message.eventId, message.accepted, message.message]);
+    case 'CLOSED':
+      return JSON.stringify(['CLOSED', message.subscriptionId, message.message]);
+    case 'NOTICE':
+      return JSON.stringify(['NOTICE', message.message]);
+    case 'AUTH':
+      return JSON.stringify(['AUTH', message.challenge]);
   }
 }

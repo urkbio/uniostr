@@ -1,3 +1,5 @@
+.trae/
+
 node_modules/
 data/*.db
 data/*.db-wal

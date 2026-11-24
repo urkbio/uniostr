@@ -1,15 +1,16 @@
 # uniostr
 
-个人自用的本地 Nostr Relay 基础工程（第一阶段）。
+个人自用的本地 Nostr Relay。
 
 - 运行时：Node.js（开发使用 tsx 直接运行 TypeScript 源码）
 - 语言：TypeScript（`tsc --noEmit` 做静态类型检查）
 - 存储：SQLite（better-sqlite3）
 - 网络：Node.js 原生 `http` + `ws`
+- 密码学：`@noble/curves` schnorr 验签，`node:crypto` 计算事件 ID
 
-当前阶段只完成可运行的基础骨架：配置加载、日志、数据库初始化、HTTP / WebSocket 服务、
-Nostr 消息类型识别。**不包含**签名校验、事件存储、订阅、EOSE、NIP-09/33/40/42、
-白名单、Relay 同步等协议功能。
+已实现：NIP-01（事件校验/存储/过滤查询/订阅/OK/EOSE）、可替换事件（kind 0/3/10000-19999）、
+可寻址事件（NIP-33，kind 30000-39999）、临时事件（kind 20000-29999）、NIP-40 过期、
+NIP-09 删除、NIP-42 AUTH 与写入白名单。
 
 ## 环境要求
 
@@ -19,18 +20,15 @@ Nostr 消息类型识别。**不包含**签名校验、事件存储、订阅、E
 ## 安装与运行
 
 ```powershell
-npm install      # 安装依赖
-npm run dev      # 以 tsx 直接运行 src/main.ts
+npm install       # 安装依赖
+npm run dev       # 以 tsx 直接运行 src/main.ts
 npm run typecheck # 静态类型检查
+npm test          # node:test 单元 + 集成测试
 ```
 
 按 `Ctrl+C` 退出，程序会先关闭 WebSocket / HTTP 服务与数据库连接再退出。
 
-首次启动会自动完成：
-
-- 生成 `config.json`（默认 `127.0.0.1:7777`，数据库 `./data/relay.db`，日志级别 `info`）
-- 创建 `data/`、`logs/` 目录（若不存在）
-- 创建 SQLite 数据库文件并初始化 `events` 表与索引
+首次启动会自动生成 `config.json`、创建 `data/` 与 `logs/` 目录，并初始化/迁移 SQLite 结构。
 
 ## 配置（config.json）
 
@@ -39,7 +37,9 @@ npm run typecheck # 静态类型检查
   "host": "127.0.0.1",
   "port": 7777,
   "database": "./data/relay.db",
-  "logLevel": "info"
+  "logLevel": "info",
+  "allowedPubkeys": [],
+  "requireAuth": false
 }
 ```
 
@@ -49,8 +49,10 @@ npm run typecheck # 静态类型检查
 | `port` | number | 监听端口，1-65535 |
 | `database` | string | SQLite 文件路径，相对路径基于工作目录 |
 | `logLevel` | `debug` \| `info` \| `warn` \| `error` | 日志级别 |
+| `allowedPubkeys` | string[] | 写入白名单（64 位 hex 公钥），空数组表示不限制 |
+| `requireAuth` | boolean | 为 true 时，连接必须完成 NIP-42 认证才能读写 |
 
-配置缺失或类型非法时，启动会失败并输出明确的错误信息。
+`allowedPubkeys` 与 `requireAuth` 可省略，缺省为 `[]` / `false`。配置类型非法时启动会失败并输出明确错误。
 
 ## 服务端点
 
@@ -62,36 +64,50 @@ npm run typecheck # 静态类型检查
 ## 目录结构
 
 ```
-config.json               自动生成的运行配置
 src/
   main.ts                 程序入口，仅负责启动应用
   config/config.ts        配置读取、默认生成、校验
   app/app.ts              生命周期：启动 / 资源释放 / 信号处理
   relay/server.ts         HTTP 与 WebSocket 服务
-  relay/handler.ts        WebSocket 消息入口，交给协议层解析
+  relay/handler.ts        协议处理：校验、入库、订阅、广播、AUTH
+  protocol/event.ts       事件类型、ID 计算、签名校验、kind 分类
+  protocol/filter.ts      filter 校验/规范化与内存匹配
+  protocol/auth.ts        NIP-42 AUTH 事件校验
+  protocol/message.ts     客户端消息解析与出站消息序列化
   storage/database.ts     SQLite 连接封装
   storage/schema.ts       表结构与迁移（PRAGMA user_version）
-  protocol/message.ts     Nostr 消息类型定义与基础识别
+  storage/events.ts       事件写入、查询、替换、删除
   utils/logger.ts         统一日志输出
+test/                     node:test 单元与集成测试
 data/                     SQLite 数据文件目录
 logs/                     日志目录（预留）
 ```
 
 ## 数据库
 
-`events` 表字段：`id`（主键）、`pubkey`、`created_at`、`kind`、`content`、`tags`（JSON 字符串）、`sig`。
+`events` 表：`id`（主键）、`pubkey`、`created_at`、`kind`、`content`、`tags`（JSON 字符串）、`sig`，
+以及写入时冗余的 `d_tag`、`expires_at`（用于可寻址事件与过期查询）。
 
-基础索引：`(pubkey, created_at)`、`(kind, created_at)`、`(created_at)`。
+索引：`(pubkey, created_at)`、`(kind, created_at)`、`(created_at)`、`(pubkey, kind, created_at)`。
 
-结构升级使用 `PRAGMA user_version` + `src/storage/schema.ts` 中的顺序迁移列表，
-不引入 ORM 或迁移框架。当前只建表，不写入任何事件。
+删除记录：`deleted_events`（按 id 的 tombstone）与 `deleted_coordinates`（可寻址坐标的 tombstone）。
 
-## 消息识别
+结构升级使用 `PRAGMA user_version` + `src/storage/schema.ts` 的顺序迁移列表，不引入 ORM 或迁移框架。
 
-客户端发送的文本帧按 JSON 数组解析，支持的识别类型：`EVENT`、`REQ`、`CLOSE`、`AUTH`、`COUNT`。
-识别成功后仅记录日志（不包含内容、不返回 OK/EOSE）；无法解析时返回 `["NOTICE", "..."]` 并记录警告。
+## 协议行为
 
-## 当前阶段尚未实现
+- `EVENT`：校验 ID 与 schnorr 签名后入库；重复事件返回 `OK true "duplicate: ..."`，
+  签名/ID 错误返回 `OK false "invalid: ..."`，已删除/白名单返回 `OK false "blocked: ..."`。
+- `REQ`：filter 之间为 OR、字段之间为 AND；`limit` 缺省 500、上限 5000；先发送历史 `EVENT`，再发送 `EOSE`，
+  随后登记订阅用于实时推送。非法 filter 或未认证返回 `CLOSED`。
+- `CLOSE`：移除订阅，无回复。
+- `AUTH`：连接建立时下发 challenge；客户端提交 kind 22242 事件（`challenge` / `relay` 标签，±10 分钟窗口）。
+- `COUNT`：本轮未实现，返回 `NOTICE`。
+- 无法解析或结构非法的消息返回 `NOTICE`。
 
-事件签名与 ID 校验、事件存储/删除/替换、REQ Filter 执行、订阅管理、EOSE、完整 OK 语义、
-NIP-09/33/40/42/50、COUNT 统计、白名单、Relay 同步、Negentropy、管理 API / Web 界面。
+可替换事件按 `(pubkey, kind)` 保留最新（同时间戳保留 id 字典序较小者）；可寻址事件按
+`(pubkey, kind, d)` 保留最新；临时事件只推送不落库；过期事件拒绝写入并在查询中排除。
+
+## 尚未实现
+
+COUNT/NIP-45、NIP-50 搜索、Negentropy、远端 Relay 同步、多用户权限体系、管理 API / Web 界面。

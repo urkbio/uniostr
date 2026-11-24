@@ -1,8 +1,10 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { loadConfig } from '../config/config.js';
+import { MessageHandler } from '../relay/handler.js';
 import { RelayServer } from '../relay/server.js';
 import { RelayDatabase } from '../storage/database.js';
+import { EventStore } from '../storage/events.js';
 import { logger, setLogLevel } from '../utils/logger.js';
 
 export interface AppOptions {
@@ -91,7 +93,8 @@ export function createApp(options: AppOptions = {}): App {
       database = new RelayDatabase(config.database);
       logger.info('数据库已就绪', { path: database.filePath });
 
-      server = new RelayServer(config);
+      const store = new EventStore(database.connection);
+      server = new RelayServer(config, new MessageHandler(store, config));
       await server.start();
 
       registerShutdownHandlers();

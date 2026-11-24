@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { RelayConfig } from '../config/config.js';
 import { logger } from '../utils/logger.js';
-import { handleClientMessage } from './handler.js';
+import type { RelayConnectionHandler } from './handler.js';
 
 const MAX_WS_PAYLOAD_BYTES = 512 * 1024;
 
@@ -12,17 +12,25 @@ const MAX_WS_PAYLOAD_BYTES = 512 * 1024;
  */
 export class RelayServer {
   private readonly config: RelayConfig;
+  private readonly handler: RelayConnectionHandler;
   private readonly startedAt = Date.now();
 
   private httpServer: Server | null = null;
   private wsServer: WebSocketServer | null = null;
 
-  constructor(config: RelayConfig) {
+  constructor(config: RelayConfig, handler: RelayConnectionHandler) {
     this.config = config;
+    this.handler = handler;
   }
 
   get address(): string {
     return `${this.config.host}:${this.config.port}`;
+  }
+
+  /** 实际监听端口，端口配置为 0 时在 start 之后才有值 */
+  get port(): number | null {
+    const address = this.httpServer?.address();
+    return address && typeof address === 'object' ? address.port : null;
   }
 
   async start(): Promise<void> {
@@ -58,9 +66,14 @@ export class RelayServer {
       throw error;
     }
 
+    const port = this.port ?? this.config.port;
+    const host = this.config.host === '0.0.0.0' || this.config.host === '::' ? '127.0.0.1' : this.config.host;
+    const relayUrl = `ws://${host}:${port}`;
+    this.handler.setRelayUrl(relayUrl);
+
     logger.info('Relay 服务已监听', {
-      http: `http://${this.address}/`,
-      ws: `ws://${this.address}/`,
+      http: `http://${host}:${port}/`,
+      ws: `${relayUrl}/`,
     });
   }
 
@@ -126,9 +139,11 @@ export class RelayServer {
     const remote = request.socket.remoteAddress ?? 'unknown';
     logger.info('WebSocket 客户端已连接', { remote, clients: this.wsServer?.clients.size ?? 1 });
 
+    this.handler.handleOpen(socket);
+
     socket.on('message', (data, isBinary) => {
       try {
-        handleClientMessage(socket, data, isBinary);
+        this.handler.handleMessage(socket, data, isBinary);
       } catch (error) {
         logger.error('处理客户端消息时发生异常', { remote, error });
         socket.close(1011, 'internal error');
@@ -136,6 +151,7 @@ export class RelayServer {
     });
 
     socket.on('close', (code, reason) => {
+      this.handler.handleClose(socket);
       logger.info('WebSocket 客户端已断开', {
         remote,
         code,

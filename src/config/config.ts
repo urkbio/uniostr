@@ -11,6 +11,10 @@ export interface RelayConfig {
   database: string;
   /** 日志级别 */
   logLevel: LogLevel;
+  /** 写入白名单，空数组表示不启用 */
+  allowedPubkeys: string[];
+  /** 为 true 时，连接必须完成 NIP-42 认证才能读写 */
+  requireAuth: boolean;
 }
 
 export const DEFAULT_CONFIG: RelayConfig = {
@@ -18,6 +22,8 @@ export const DEFAULT_CONFIG: RelayConfig = {
   port: 7777,
   database: './data/relay.db',
   logLevel: 'info',
+  allowedPubkeys: [],
+  requireAuth: false,
 };
 
 export const DEFAULT_CONFIG_PATH = path.resolve(process.cwd(), 'config.json');
@@ -35,6 +41,38 @@ export class ConfigError extends Error {
 function assertString(value: unknown, key: string, configPath: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new ConfigError(`配置项 "${key}" 必须是非空字符串，当前值：${JSON.stringify(value)}`, configPath);
+  }
+  return value;
+}
+
+const PUBKEY_PATTERN = /^[0-9a-fA-F]{64}$/;
+
+function validateAllowedPubkeys(value: unknown, configPath: string): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new ConfigError('配置项 "allowedPubkeys" 必须是公钥数组', configPath);
+  }
+  const pubkeys: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || !PUBKEY_PATTERN.test(item)) {
+      throw new ConfigError(
+        `配置项 "allowedPubkeys" 包含无效公钥（需 64 位 hex）：${JSON.stringify(item)}`,
+        configPath,
+      );
+    }
+    pubkeys.push(item.toLowerCase());
+  }
+  return pubkeys;
+}
+
+function validateRequireAuth(value: unknown, configPath: string): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  if (typeof value !== 'boolean') {
+    throw new ConfigError(`配置项 "requireAuth" 必须是布尔值，当前值：${JSON.stringify(value)}`, configPath);
   }
   return value;
 }
@@ -61,7 +99,14 @@ function validateConfig(raw: unknown, configPath: string): RelayConfig {
     );
   }
 
-  return { host, port, database, logLevel };
+  return {
+    host,
+    port,
+    database,
+    logLevel,
+    allowedPubkeys: validateAllowedPubkeys(source.allowedPubkeys, configPath),
+    requireAuth: validateRequireAuth(source.requireAuth, configPath),
+  };
 }
 
 function writeDefaultConfig(configPath: string): void {

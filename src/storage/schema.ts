@@ -35,6 +35,44 @@ const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    up(db) {
+      db.exec(`
+        ALTER TABLE events ADD COLUMN d_tag TEXT;
+        ALTER TABLE events ADD COLUMN expires_at INTEGER;
+
+        UPDATE events SET d_tag = (
+          SELECT json_extract(t.value, '$[1]')
+          FROM json_each(events.tags) t
+          WHERE json_extract(t.value, '$[0]') = 'd'
+          LIMIT 1
+        );
+        UPDATE events SET expires_at = CAST((
+          SELECT json_extract(t.value, '$[1]')
+          FROM json_each(events.tags) t
+          WHERE json_extract(t.value, '$[0]') = 'expiration'
+          LIMIT 1
+        ) AS INTEGER);
+
+        CREATE INDEX IF NOT EXISTS idx_events_pubkey_kind_created_at
+          ON events (pubkey, kind, created_at);
+
+        CREATE TABLE IF NOT EXISTS deleted_events (
+          event_id   TEXT    PRIMARY KEY NOT NULL,
+          deleted_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS deleted_coordinates (
+          pubkey           TEXT    NOT NULL,
+          kind             INTEGER NOT NULL,
+          d_tag            TEXT    NOT NULL,
+          until_created_at INTEGER NOT NULL,
+          PRIMARY KEY (pubkey, kind, d_tag)
+        );
+      `);
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.reduce((max, migration) => Math.max(max, migration.version), 0);
