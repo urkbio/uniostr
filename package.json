@@ -1,0 +1,26 @@
+{
+  "name": "uniostr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal local Nostr relay (TypeScript + Node.js + SQLite)",
+  "type": "module",
+  "main": "src/main.ts",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.2.0",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
